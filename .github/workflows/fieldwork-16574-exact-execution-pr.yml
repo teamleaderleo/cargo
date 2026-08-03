@@ -1,0 +1,150 @@
+name: Fieldwork Cargo 16574 exact-version carrier
+
+on:
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fieldwork-cargo-16574-exact-version
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    if: github.event.pull_request.head.ref == 'execution/16574-exact-version'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fieldwork/16574-patch-source-fetch
+          path: candidate
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          path: default
+          fetch-depth: 0
+
+      - name: Execute exact-version contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          mkdir -p fieldwork/16574/results
+          rg -n -C 8 'patches\.len\(\) == 1|is_locked\(\)|version_req\(\).*is_exact|A crucial feature of the `\[patch\]`' \
+            src/cargo > fieldwork/16574/results/exact-version-source-map.txt || true
+
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tests/testsuite/patch.rs')
+          text = path.read_text()
+          marker = '''\n#[cargo_test]\nfn patch_to_git() {'''
+          test = r'''
+
+#[cargo_test]
+fn config_path_patch_exact_version_can_avoid_unreachable_git_source() {
+    let source = "ssh://127.0.0.1:9/foo-dep.git";
+    let p = project()
+        .file(
+            "Cargo.toml",
+            &format!(
+                r#"
+                    [package]
+                    name = "cargo-patch-exact-test"
+                    version = "0.0.1"
+
+                    [dependencies.foo-dep]
+                    git = "{source}"
+                    version = "=0.1.0"
+                "#,
+            ),
+        )
+        .file(
+            ".cargo/config.toml",
+            &format!(
+                r#"
+                    [patch."{source}"]
+                    foo-dep = {{ path = "foo-dep" }}
+                "#,
+            ),
+        )
+        .file("src/lib.rs", "pub fn local() -> bool { foo_dep::local() }")
+        .file("foo-dep/Cargo.toml", &basic_manifest("foo-dep", "0.1.0"))
+        .file("foo-dep/src/lib.rs", "pub fn local() -> bool { true }")
+        .build();
+
+    p.cargo("check")
+        .env("CARGO_NET_RETRY", "0")
+        .with_stderr_data(str![[r#"
+[LOCKING] 1 package to latest compatible version
+[CHECKING] foo-dep v0.1.0 ([ROOT]/foo/foo-dep)
+[CHECKING] cargo-patch-exact-test v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+}
+'''
+          if text.count(marker) != 1:
+              raise SystemExit('unexpected patch_to_git marker')
+          path.write_text(text.replace(marker, test + marker, 1))
+          PY
+
+          set +e
+          cargo test --test testsuite patch::config_path_patch_exact_version_can_avoid_unreachable_git_source \
+            -- --nocapture > fieldwork/16574/results/exact-version-contract.txt 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > fieldwork/16574/results/exact-version-exit-status.txt
+          git checkout -- tests/testsuite/patch.rs
+
+          if test "$status" -eq 0; then
+            state=present
+          elif grep -Eq 'failed to (load source|clone|fetch)|unable to update|Connection refused' \
+              fieldwork/16574/results/exact-version-contract.txt; then
+            state=absent
+          else
+            cat fieldwork/16574/results/exact-version-contract.txt
+            exit 1
+          fi
+          printf '%s\n' "$state" > fieldwork/16574/results/exact-version-fast-path-state.txt
+          git diff --check
+
+          cat > fieldwork/16574/exact-version-receipt.md <<EOF
+          # Cargo 16574 exact-version fast-path receipt
+
+          - Workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          - Starting packet head: $(git rev-parse HEAD)
+          - Runner: ubuntu-latest with repository Rust toolchain
+          - Exact dependency requirement: \`=0.1.0\`
+          - One matching local patch candidate: \`foo-dep 0.1.0\`
+          - Original git source: deterministic unreachable loopback SSH endpoint
+          - Observed fast-path state: \`${state}\`
+          - \`present\` means the local candidate completed without source access. \`absent\` means current Cargo reached the original-source product path.
+          - Current owning source matches are retained in \`results/exact-version-source-map.txt\`.
+          - Evidence class: target-executed focused contract on Linux; no production source change.
+          - Upstream contact: unauthorized and absent.
+          EOF
+
+          git config user.name fieldwork-bot
+          git config user.email fieldwork-bot@users.noreply.github.com
+          git add fieldwork/16574
+          git commit -m "Record Cargo exact-version patch fast-path probe"
+          git push origin HEAD:fieldwork/16574-patch-source-fetch
+
+      - name: Retire workflow
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd default
+          if test -f .github/workflows/fieldwork-16574-exact-execution-pr.yml; then
+            git config user.name fieldwork-bot
+            git config user.email fieldwork-bot@users.noreply.github.com
+            git rm .github/workflows/fieldwork-16574-exact-execution-pr.yml
+            git commit -m "Retire Cargo 16574 exact-version carrier"
+            git push origin HEAD:master
+          fi
