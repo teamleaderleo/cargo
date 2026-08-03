@@ -13,8 +13,35 @@ A no-fetch implementation needs explicit answers to all of these:
 9. **Offline/frozen modes** — should the new rule be general, or a fallback only when source access is impossible?
 10. **Identity and checksums** — does the replacement retain the original source identity in the lockfile or become an ordinary path source?
 
-## Plausible direction
+## Current maintainer model
 
-A new, explicitly named configuration mechanism is safer than changing `[patch]` implicitly. For example, a local-only exact override could declare that a dependency source ID and package name are replaced before resolution, reject ambiguity, and fail if another package from the original source is needed.
+Cargo loads both original and patched sources because `[patch]` adds candidates rather than textually replacing a dependency. The original source may still win when the patch version does not satisfy the requirement or when activated features are unavailable from the patch. For git sources, skipping the original source generally would therefore be a compatibility change.
 
-That mechanism should be designed separately from the current issue's proposed implementation. The existing `[patch]` contract and tests should remain unchanged until Cargo accepts a new semantic rule.
+A committed lockfile remains a supported way to avoid rediscovery. Maintainer discussion also identifies a historical narrower fast path: when there is exactly one patch and the dependency has an exact `=a.b.c` requirement, Cargo can determine that a matching patch candidate is sufficient without querying the original source. PR #9847 separated a genuinely lockfile-locked requirement from an ordinary exact requirement, apparently disabling that optimization around Cargo 1.57.
+
+## Bounded implementation question
+
+Before inventing a new override mechanism, test whether restoring the **single-patch plus ordinary exact-version** fast path is still semantically valid on current Cargo:
+
+- exactly one patch candidate exists for the dependency;
+- its package name and version satisfy the exact requirement;
+- required features are available from that candidate;
+- no other package from the same source is needed for this dependency query;
+- lockfile and source identity behavior remain unchanged from the historical contract.
+
+Required negative controls:
+
+- non-exact version ranges still query the original source;
+- an exact version mismatch still queries the original source;
+- a feature mismatch still permits the original source to win;
+- multiple patch candidates do not take the fast path;
+- another required package from the same git workspace remains fetchable;
+- existing committed-lockfile behavior is unchanged.
+
+This is narrower than the issue's general expectation and should be treated as a regression-restoration hypothesis, not as acceptance of no-fetch semantics for every git patch.
+
+## Broader plausible direction
+
+If the exact-version fast path is insufficient, a new, explicitly named configuration mechanism is safer than changing `[patch]` implicitly. A local-only exact override could declare that a dependency source ID and package name are replaced before resolution, reject ambiguity, and fail if another package from the original source is needed.
+
+That mechanism should be designed separately from the current issue's proposed implementation. The existing general `[patch]` contract and tests should remain unchanged until Cargo accepts a new semantic rule.
