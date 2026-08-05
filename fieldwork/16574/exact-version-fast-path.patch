@@ -1,0 +1,53 @@
+diff --git a/tests/testsuite/patch.rs b/tests/testsuite/patch.rs
+index bd14ef67d..000000000 100644
+--- a/tests/testsuite/patch.rs
++++ b/tests/testsuite/patch.rs
+@@
+ #[cargo_test]
+ fn patch_to_git() {
+@@
+ }
++
++#[cargo_test]
++fn config_path_patch_exact_version_can_avoid_unreachable_git_source() {
++    let source = "ssh://127.0.0.1:9/foo-dep.git";
++    let p = project()
++        .file(
++            "Cargo.toml",
++            &format!(
++                r#"
++                    [package]
++                    name = "cargo-patch-exact-test"
++                    version = "0.0.1"
++
++                    [dependencies.foo-dep]
++                    git = "{source}"
++                    version = "=0.1.0"
++                "#,
++            ),
++        )
++        .file(
++            ".cargo/config.toml",
++            &format!(
++                r#"
++                    [patch."{source}"]
++                    foo-dep = {{ path = "foo-dep" }}
++                "#,
++            ),
++        )
++        .file("src/lib.rs", "pub fn local() -> bool { foo_dep::local() }")
++        .file("foo-dep/Cargo.toml", &basic_manifest("foo-dep", "0.1.0"))
++        .file("foo-dep/src/lib.rs", "pub fn local() -> bool { true }")
++        .build();
++
++    p.cargo("check")
++        .env("CARGO_NET_RETRY", "0")
++        .with_stderr_data(str![[r#"
++[LOCKING] 1 package to latest compatible version
++[CHECKING] foo-dep v0.1.0 ([ROOT]/foo/foo-dep)
++[CHECKING] cargo-patch-exact-test v0.0.1 ([ROOT]/foo)
++[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
++
++"#]])
++        .run();
++}

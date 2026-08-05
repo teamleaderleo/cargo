@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [fieldwork] Test proposed exact local patch no-fetch invariant
+
+This test deliberately proposes behavior that current Cargo does not implement.
+It must remain failing until the design questions in DESIGN.md are answered.
+
+--- a/tests/testsuite/patch.rs
++++ b/tests/testsuite/patch.rs
+@@
+ fn patch_git() {
+@@
+ }
++
++#[cargo_test]
++fn config_path_patch_can_replace_unreachable_git_dependency_without_fetch() {
++    let p = project()
++        .file(
++            "Cargo.toml",
++            r#"
++                [package]
++                name = "cargo-patch-test"
++                version = "0.0.1"
++
++                [dependencies.foo-dep]
++                git = "ssh://unreachable.invalid/foo-dep.git"
++            "#,
++        )
++        .file(
++            ".cargo/config.toml",
++            r#"
++                [patch."ssh://unreachable.invalid/foo-dep.git"]
++                foo-dep = { path = "foo-dep" }
++            "#,
++        )
++        .file("src/lib.rs", "pub fn local() -> bool { foo_dep::local() }")
++        .file("foo-dep/Cargo.toml", &basic_manifest("foo-dep", "0.1.0"))
++        .file("foo-dep/src/lib.rs", "pub fn local() -> bool { true }")
++        .build();
++
++    p.cargo("check")
++        .with_stderr_data(str![[r#"
++[LOCKING] 1 package to latest compatible version
++[CHECKING] foo-dep v0.1.0 ([ROOT]/foo/foo-dep)
++[CHECKING] cargo-patch-test v0.0.1 ([ROOT]/foo)
++[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
++
++"#]])
++        .run();
++}
++
++// Required companion controls before implementation:
++// - mismatched patch version still needs original source or a deterministic error;
++// - two packages from one git workspace, only one patched;
++// - transitive unpatched use of the same git source;
++// - branch/tag/rev selectors;
++// - existing lockfile versus first resolution;
++// - unused patch diagnostics.
