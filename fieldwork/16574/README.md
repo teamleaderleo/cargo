@@ -24,7 +24,7 @@ Fieldwork run `30842332925`, job `91782183881`, tested the narrower historical h
 - Cargo still reached the original git source and failed there;
 - no production source change was made.
 
-The runner lacked `rg`, so source-map collection used the script's fallback path. The product result and retained state are valid; this was not classified as a clean full Cargo gate.
+The runner lacked `rg`. The optional source-map command was guarded and the focused Cargo test still executed, so the product result is valid; however, the retained `source-map.txt` is empty and this run did not capture a current source map. This was not a clean full Cargo gate.
 
 ## Upstream/process state
 
@@ -55,4 +55,4 @@ Any production lane now requires an accepted semantic design that explains candi
 
 ## Evidence state
 
-`target-executed-focused`; broad no-fetch contract negative; exact-version fast path absent; production change **held for accepted design**. No upstream contact.
+`target-executed-focused`; broad no-fetch contract negative; exact-version fast path absent; source-map capture missing; production change **held for accepted design**. No upstream contact.
